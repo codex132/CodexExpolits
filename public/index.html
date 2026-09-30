@@ -486,6 +486,12 @@ body{display:flex;height:100dvh}
         </div>
       </div>
 
+      <div class="msec">
+        <h3>Live Model Probe</h3>
+        <div class="hint" style="margin-bottom:8px">Tests each provider live and finds which models actually work right now. Takes ~5 seconds.</div>
+        <button class="mb-btn" id="probe-btn" style="background:linear-gradient(135deg,#003a4d,#005a78);border-color:var(--teal2);color:var(--teal);margin-bottom:8px">🔍 Run Live Probe</button>
+        <div id="probe-results" style="display:none;background:var(--bg);border:1px solid var(--bd);border-radius:var(--r);padding:10px 12px;font-family:var(--mono);font-size:10px;line-height:2;color:var(--tx2);max-height:200px;overflow-y:auto"></div>
+      </div>
       <button class="mb-btn" id="save-set-btn">💾 Save Settings</button>
     </div>
   </div>
@@ -982,6 +988,37 @@ function bindAll() {
 
   // TEST KEY BUTTONS
   document.querySelectorAll('.test-btn').forEach(b => b.onclick = () => testKey(b.dataset.prov));
+
+  // LIVE PROBE
+  $('probe-btn').onclick = async () => {
+    const btn = $('probe-btn');
+    const res = $('probe-results');
+    btn.textContent = '⏳ Probing providers...';
+    btn.disabled = true;
+    res.style.display = 'block';
+    res.textContent = 'Testing all providers live...';
+    try {
+      const data = await fetch('/api/probe').then(r => r.json());
+      let out = '';
+      for (const [prov, r] of Object.entries(data)) {
+        if (r.skip) { out += `${prov}: no key\n`; continue; }
+        out += `\n── ${prov.toUpperCase()} ──\n`;
+        if (r.working) out += `✓ WORKING: ${r.working}\n`;
+        else out += `✗ NO WORKING MODEL FOUND\n`;
+        if (r.tried) r.tried.forEach(t => {
+          out += `  ${t.ok ? '✓' : '✗'} ${t.model} → ${t.status || t.error || '?'}\n`;
+        });
+      }
+      res.textContent = out;
+      // Update working models display
+      const hasWorking = Object.values(data).some(r => r.working);
+      btn.textContent = hasWorking ? '✅ Probe complete — check results' : '⚠ No working models found';
+    } catch(e) {
+      res.textContent = 'Probe failed: ' + e.message;
+      btn.textContent = '🔍 Run Live Probe';
+    }
+    btn.disabled = false;
+  };
 
   bindPills();
 }
