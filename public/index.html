@@ -696,7 +696,10 @@ async function sendMsg() {
           const evt = JSON.parse(d);
           if (evt.token) {
             full += evt.token;
-            bodyEl.innerHTML = mdRender(full) + `<span class="cursor ${isGod?'god':''}"></span>`;
+            // auto-close any unclosed code fence for mid-stream render so mdRender doesn't escape partial blocks
+            const fences = (full.match(/```/g)||[]).length;
+            const renderSafe = fences % 2 !== 0 ? full + '\n```' : full;
+            bodyEl.innerHTML = mdRender(renderSafe) + `<span class="cursor ${isGod?'god':''}"></span>`;
             $('msgs').scrollTop = 9999;
           }
           if (evt.providerSwitch) {
@@ -929,7 +932,7 @@ window.cpCode = btn => {
 const esc = t => String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 const fmtTime = () => new Date().toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
 function autoResize() { const e=$('prompt'); e.style.height='auto'; e.style.height=Math.min(e.scrollHeight,180)+'px'; }
-function updateSendBtn() { $('send-btn').disabled = !($('prompt').value.trim()||atts.length)||!curChatId; }
+function updateSendBtn() { $('send-btn').disabled = !($('prompt').value.trim()||atts.length); }
 function closeSb() { $('sb').classList.remove('open'); $('sbo').classList.remove('open'); }
 
 function bindPills() {
