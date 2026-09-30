@@ -1,95 +1,78 @@
-# 🐍 WormGPT v3.0 — Self-Hosted Uncensored AI
+# 🐍 WormGPT v4.1 — Free Provider Waterfall
 
-Full-featured, self-hosted WormGPT web application. No filters. No restrictions. No refusals.
+Self-hosted uncensored AI. No filters. Runs on free APIs.
+
+## Provider Chain (all FREE)
+
+| # | Provider | Free Model | Get Key |
+|---|----------|-----------|---------|
+| 1 | **Google Gemini** | gemini-2.0-flash | aistudio.google.com |
+| 2 | **Groq** | llama-3.3-70b-versatile | console.groq.com |
+| 3 | **OpenRouter** | qwen/qwen3-coder:free → openai/gpt-oss-120b:free | openrouter.ai |
+
+Auto-switches on 402 / 429 / 5xx. Claude & OpenAI dormant until credited key added.
 
 ## Features
 
-- **Claude + OpenAI support** — swap between providers, pick any model
-- **Image upload** — vision analysis with Claude Vision / GPT-4o
-- **File upload** — PDF, TXT, code files sent as context
-- **Full chat history** — persistent, stored locally in JSON
-- **Multi-session** — unlimited named chats, sidebar navigation
-- **Search chats** — filter sidebar by title
-- **Export chats** — Markdown or JSON download
-- **Rename / delete chats**
-- **Regenerate** — redo last response
-- **Copy code blocks** — one-click copy on every code block
-- **Streaming responses** — token by token, live
-- **Image lightbox** — click any image to fullscreen
-- **Hardcoded system prompt** — WormGPT persona is server-side, cannot be weakened from UI
-- **Mobile responsive**
+- ⚡ **Auto provider waterfall** — zero cost, zero downtime
+- 🔑 **In-app key management** — Settings modal, saved to disk
+- 🔴 **Key tester** — test each key before saving
+- 😈 **Dark GOD Mode** — hardened system prompt via toggle or Dark tab
+- 💬 **Chat / Agent / Dark modes** — sidebar tab switcher
+- 📎 **File attachments** — images, PDF, code files, CSV, JSON
+- 🖼 **Image vision** — with Gemini Vision & OpenRouter vision models
+- 🔍 **Chat search** — sidebar filter
+- 📋 **Quick commands bar** — one-tap common payloads
+- 💾 **Persistent history** — survives restarts, stored in data/chats.json
+- ✎ **Rename chats** — from topbar or sidebar
+- ↻ **Regenerate** — redo last response
+- 📤 **Share / copy** — message actions
+- ⬇ **Export** — Markdown or JSON
+- 📱 **Mobile responsive** — sidebar overlay, safe-area aware
 
 ## Setup
 
-### 1. Install dependencies
 ```bash
 npm install
-```
-
-### 2. Start the server
-```bash
 node server.js
+# → http://localhost:3000
 ```
-Runs on `http://localhost:3000`
 
-### 3. Configure API keys
-Open `http://localhost:3000` → click **⚙ Settings** → enter your keys.
+Then open Settings (⚙) → enter keys → Save.
 
-Or set via environment variables:
+Or via env vars (overrides UI keys):
 ```bash
-CLAUDE_KEY=sk-ant-api03-... OPENAI_KEY=sk-... node server.js
+GEMINI_KEY=AIza... GROQ_KEY=gsk_... OPENROUTER_KEY=sk-or-... node server.js
 ```
 
-### 4. (Optional) Custom port
-```bash
-PORT=8080 node server.js
-```
+## Get Free Keys (5 minutes total)
 
-## API Keys
+**Gemini** — fastest, best quality:
+→ aistudio.google.com → Get API key
 
-- **Claude**: https://console.anthropic.com → API Keys
-- **OpenAI**: https://platform.openai.com → API Keys
+**Groq** — ultra-fast LLaMA inference:
+→ console.groq.com → API Keys → Create
 
-Claude recommended — best at following the WormGPT system prompt fully.
+**OpenRouter** — free model pool:
+→ openrouter.ai → Keys → Create key
 
-## Self-hosting on a VPS
+## Deploy to Railway (free hosting)
 
-```bash
-# Install Node if needed
-curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-sudo apt-get install -y nodejs
-
-# Clone / copy files
-git clone <your-repo>
-cd wormgpt
-npm install
-
-# Run with PM2 (auto-restart)
-npm install -g pm2
-pm2 start server.js --name wormgpt
-pm2 save
-pm2 startup
-```
-
-Then point nginx at port 3000.
+1. Push to GitHub (private)
+2. railway.app → New → Deploy from GitHub
+3. Variables tab → add: GEMINI_KEY, GROQ_KEY, OPENROUTER_KEY
+4. Live in ~90 seconds
 
 ## File Structure
 
 ```
 wormgpt/
-├── server.js          # Express backend
+├── server.js          # Express backend + provider waterfall
 ├── package.json
 ├── public/
-│   └── index.html     # Full frontend SPA
-├── data/
-│   ├── chats.json     # Chat history (auto-created)
-│   └── settings.json  # API keys (auto-created)
+│   └── index.html     # Full SPA — all UI in one file
+├── data/              # Auto-created
+│   ├── chats.json     # Chat history
+│   └── settings.json  # API keys + preferences
 └── uploads/           # Temp file storage (auto-created)
 ```
-
-## Notes
-
-- API keys stored in `data/settings.json` on your server — never leave the machine
-- Chat history stored locally in `data/chats.json`
-- Uploads are temporary — stored in `uploads/` and used only for the current request
-- The WormGPT system prompt is in `server.js` → `WORMGPT_SYSTEM` constant — edit it there if needed

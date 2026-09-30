@@ -1,11 +1,10 @@
 {
   "name": "wormgpt",
-  "version": "3.0.0",
-  "description": "WormGPT — Self-hosted uncensored AI web application",
+  "version": "4.0.0",
+  "description": "WormGPT — Self-hosted | Free provider waterfall: Gemini → Groq → OpenRouter",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node server.js"
   },
   "dependencies": {
     "express": "^4.18.2",
