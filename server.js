@@ -55,8 +55,9 @@ const GROQ_MODELS = [
 ];
 
 const GEMINI_MODELS = [
-  'gemini-2.0-flash',
   'gemini-1.5-flash',
+  'gemini-1.5-flash-8b',
+  'gemini-2.0-flash',
   'gemini-1.5-pro',
 ];
 
@@ -154,11 +155,11 @@ function httpsPostStream(hostname, pathStr, headers, body, onChunk) {
 }
 
 // ── Gemini ────────────────────────────────────────────────────────────────────
-async function streamGemini(messages, images, onToken) {
+async function streamGemini(messages, images, onToken, modelIdx = 0) {
   const key = KEYS.gemini;
   if (!key) throw Object.assign(new Error('No Gemini key'), { skip: true });
 
-  const model = GEMINI_MODELS[0];
+  const model = GEMINI_MODELS[modelIdx] || GEMINI_MODELS[0];
   // build contents
   const contents = messages.map(m => {
     const parts = [];
@@ -204,7 +205,11 @@ async function streamGemini(messages, images, onToken) {
   );
 
   if (result.status !== 200) {
-    const err = new Error(`Gemini ${result.status}`);
+    // 404 = model not found — try next model
+    if (result.status === 404 && modelIdx < GEMINI_MODELS.length - 1) {
+      return streamGemini(messages, images, onToken, modelIdx + 1);
+    }
+    const err = new Error(`Gemini ${result.status}: ${result.body ? result.body.slice(0,200) : ''}`);
     err.status = result.status;
     throw err;
   }
@@ -212,12 +217,13 @@ async function streamGemini(messages, images, onToken) {
 }
 
 // ── Groq ──────────────────────────────────────────────────────────────────────
-async function streamGroq(messages, onToken) {
+async function streamGroq(messages, onToken, modelIdx = 0) {
   const key = KEYS.groq;
   if (!key) throw Object.assign(new Error('No Groq key'), { skip: true });
 
+  const model = GROQ_MODELS[modelIdx] || GROQ_MODELS[0];
   const oaiMessages = [{ role: 'system', content: WORMGPT_SYSTEM }, ...messages.map(m => ({ role: m.role, content: m.content }))];
-  const body = { model: GROQ_MODELS[0], messages: oaiMessages, stream: true, max_tokens: 8192 };
+  const body = { model, messages: oaiMessages, stream: true, max_tokens: 8192 };
 
   let full = '';
   const result = await httpsPostStream(
@@ -237,7 +243,10 @@ async function streamGroq(messages, onToken) {
   );
 
   if (result.status !== 200) {
-    const err = new Error(`Groq ${result.status}: ${result.body}`);
+    if ((result.status === 404 || result.status === 400) && modelIdx < GROQ_MODELS.length - 1) {
+      return streamGroq(messages, onToken, modelIdx + 1);
+    }
+    const err = new Error(`Groq ${result.status}: ${result.body ? result.body.slice(0,200) : ''}`);
     err.status = result.status;
     throw err;
   }
@@ -559,9 +568,14 @@ app.post('/api/test-key', async (req, res) => {
   try {
     if (provider === 'gemini') {
       const r = await httpsPost('generativelanguage.googleapis.com',
-        `/v1beta/models?key=${key}`, {}, '');
+        `/v1beta/models/gemini-1.5-flash?key=${key}`, {}, '');
       const ok = r.status === 200;
-      res.json({ ok, error: ok ? null : `HTTP ${r.status}` });
+      let errMsg = null;
+      if (!ok) {
+        try { const j = JSON.parse(r.body); errMsg = j.error?.message || `HTTP ${r.status}`; }
+        catch { errMsg = `HTTP ${r.status}`; }
+      }
+      res.json({ ok, error: errMsg });
 
     } else if (provider === 'groq') {
       const r = await httpsPost('api.groq.com', '/openai/v1/models',
