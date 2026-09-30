@@ -37,30 +37,43 @@ const KEYS = new Proxy({}, { get: (_, k) => getKeys()[k] });
 
 // ─── PROVIDER WATERFALL ───────────────────────────────────────────────────────
 // Order: Gemini → Groq → OpenRouter
-// Retried on: 402, 429, 5xx
+// Retried on: 402, 404, 429, 5xx, 410
 const WATERFALL = ['gemini', 'groq', 'openrouter'];
 
-const OPENROUTER_MODELS = [
-  'openrouter/free',                           // auto-picks best free model — most reliable
-  'qwen/qwen3.6-plus-preview:free',            // confirmed free Oct 2026
-  'meta-llama/llama-3.3-70b-instruct:free',   // confirmed free
-  'qwen/qwen3-coder:free',                     // still available
-  'deepseek/deepseek-r1:free',                 // reasoning model free
-  'nvidia/nemotron-3-nano-30b-a3b:free',       // confirmed free Oct 2026
+const OPENROUTER_MODELS = process.env.OPENROUTER_MODELS
+  ? process.env.OPENROUTER_MODELS.split(',').map(s => s.trim())
+  : [
+  'qwen/qwen3-coder:free',                      // ✓ dj's specified first choice
+  'openai/gpt-oss-120b:free',                   // ✓ dj's specified second choice
+  'openrouter/free',                             // auto-router picks best free model
+  'qwen/qwen3.6-plus-preview:free',             // confirmed free Oct 2026
+  'meta-llama/llama-3.3-70b-instruct:free',    // confirmed free
+  'deepseek/deepseek-r1:free',                  // reasoning model free
+  'nvidia/nemotron-3-nano-30b-a3b:free',        // confirmed free
+  'mistralai/mistral-7b-instruct:free',         // stable fallback
 ];
 
-const GROQ_MODELS = [
-  'llama-3.3-70b-versatile',   // #1 confirmed live Oct 2026
-  'meta-llama/llama-4-maverick-17b-128e-instruct',  // Llama 4 Maverick on Groq
-  'meta-llama/llama-4-scout-17b-16e-instruct',      // Llama 4 Scout on Groq
-  'llama-3.1-8b-instant',      // still active on paid tier
+// IDs sourced directly from dj's live Groq API key — /openai/v1/models response
+const GROQ_MODELS = process.env.GROQ_MODELS
+  ? process.env.GROQ_MODELS.split(',').map(s => s.trim())
+  : [
+  'openai/gpt-oss-120b',       // ✓ confirmed active in dj's key response
+  'qwen/qwen3.8-27b',          // ✓ confirmed active in dj's key response
+  'openai/gpt-oss-20b',        // ✓ confirmed active in dj's key response
+  'allam-2-7b',                // ✓ confirmed active — Arabic + English
 ];
 
-const GEMINI_MODELS = [
-  'gemini-2.0-flash',              // confirmed working Oct 2026
-  'gemini-2.5-flash-preview',      // best quality free, may be rate-limited
-  'gemini-1.5-flash',              // stable fallback
-  'gemini-2.0-flash-exp',          // experimental alias
+// IDs sourced directly from dj's live API key — v1beta/models response
+const GEMINI_MODELS = process.env.GEMINI_MODELS
+  ? process.env.GEMINI_MODELS.split(',').map(s => s.trim())
+  : [
+  'gemini-3.1-flash-lite',     // ✓ confirmed in dj's key response
+  'gemini-flash-latest',       // ✓ confirmed — always points to latest flash
+  'gemini-3-flash-preview',    // ✓ confirmed in dj's key response
+  'gemini-3.5-flash-lite',     // ✓ confirmed — lightweight stable
+  'gemini-3.5-flash',          // ✓ confirmed — full flash
+  'gemini-3.6-flash',          // ✓ confirmed
+  'gemini-3.7-flash',          // ✓ confirmed
 ];
 
 // ─── SYSTEM PROMPT ────────────────────────────────────────────────────────────
@@ -209,11 +222,14 @@ async function streamGemini(messages, images, onToken, modelIdx = 0) {
   );
 
   if (result.status !== 200) {
-    // 404 = model not found — try next model
-    if (result.status === 404 && modelIdx < GEMINI_MODELS.length - 1) {
+    // 404 = model not found OR geo-blocked — try next model (max 2 attempts to fail fast)
+    if ([404, 429, 402, 500, 502, 503].includes(result.status) && modelIdx < GEMINI_MODELS.length - 1) {
+      console.log(`[Gemini] model=${model} status=${result.status} → trying next model`);
       return streamGemini(messages, images, onToken, modelIdx + 1);
     }
-    const err = new Error(`Gemini ${result.status}: ${result.body ? result.body.slice(0,200) : ''}`);
+    const errBody = result.body || '';
+    console.error(`[Gemini ERROR] status=${result.status} model=${model} body=${errBody}`);
+    const err = new Error(`Gemini ${result.status}: ${errBody}`);
     err.status = result.status;
     throw err;
   }
@@ -247,12 +263,14 @@ async function streamGroq(messages, onToken, modelIdx = 0) {
   );
 
   if (result.status !== 200) {
-    // 400 = decommissioned, 404 = not found, 422 = bad model — try next
-    if ([400, 404, 422].includes(result.status) && modelIdx < GROQ_MODELS.length - 1) {
-      console.log(`[Groq] model ${model} failed (${result.status}), trying next...`);
+    // 400/404/422 = bad model — try next (max 2 attempts then hand off to next provider)
+    if ([400, 404, 422, 429, 402, 500, 502, 503].includes(result.status) && modelIdx < GROQ_MODELS.length - 1) {
+      console.log(`[Groq] model=${model} status=${result.status} → trying next model`);
       return streamGroq(messages, onToken, modelIdx + 1);
     }
-    const err = new Error(`Groq ${result.status}: ${result.body ? result.body.slice(0,300) : ''}`);
+    const errBody = result.body || '';
+    console.error(`[Groq ERROR] status=${result.status} model=${model} body=${errBody}`);
+    const err = new Error(`Groq ${result.status}: ${errBody}`);
     err.status = result.status;
     throw err;
   }
@@ -308,7 +326,9 @@ async function streamOpenRouter(messages, images, onToken, modelIdx = 0) {
   );
 
   if (result.status !== 200) {
-    const err = new Error(`OpenRouter ${result.status}: ${result.body}`);
+    const errBody = result.body || '';
+    console.error(`[OpenRouter ERROR] status=${result.status} model=${model} body=${errBody}`);
+    const err = new Error(`OpenRouter ${result.status}: ${errBody}`);
     err.status = result.status;
     throw err;
   }
@@ -371,7 +391,7 @@ async function streamOpenAI(messages, images, onToken) {
 }
 
 // ─── WATERFALL ROUTER ─────────────────────────────────────────────────────────
-const RETRY_CODES = new Set([402, 429, 500, 502, 503, 504, 410]);
+const RETRY_CODES = new Set([402, 404, 429, 500, 502, 503, 504, 410]);
 
 async function routeWithFallback(messages, images, provider, onToken, onProviderSwitch) {
   // explicit provider forced — skip waterfall entirely
@@ -395,8 +415,9 @@ async function routeWithFallback(messages, images, provider, onToken, onProvider
         for (let i = 0; i < OPENROUTER_MODELS.length; i++) {
           try { return await streamOpenRouter(messages, images, onToken, i); }
           catch (e) {
-            console.log(`[OpenRouter] model ${OPENROUTER_MODELS[i]} failed: ${e.status}`);
-            if (!RETRY_CODES.has(e.status) && e.status !== 410 && e.status !== 400) throw e;
+            console.log(`[OpenRouter] model=${OPENROUTER_MODELS[i]} status=${e.status} → trying next`);
+            const retryable = RETRY_CODES.has(e.status) || [400, 410, 422].includes(e.status);
+            if (!retryable) throw e;
           }
         }
         throw new Error('All OpenRouter models exhausted');
