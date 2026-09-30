@@ -350,7 +350,7 @@ body{display:flex;height:100dvh}
   <div id="msgs">
     <div id="welcome">
       <div class="wt" id="wt-title">🐍 WORMGPT</div>
-      <div class="ws">No filters · No restrictions · No refusals<br>Free provider waterfall — runs without spending a cent.</div>
+      <div class="ws">No filters · No restrictions · No refusals<br>Free provider waterfall — Gemini → Groq → OpenRouter.</div>
       <div id="pstat" class="pstat"></div>
       <div class="wdiv"></div>
       <div class="prow" id="wpills">
@@ -392,7 +392,7 @@ body{display:flex;height:100dvh}
           <option value="groq">🦊 Force Groq</option>
           <option value="openrouter">🌐 Force OpenRouter</option>
         </select>
-        <div class="hint">Auto waterfall switches provider on 402 / 429 / 5xx. Set a specific provider to skip switching.</div>
+        <div class="hint">Auto waterfall switches provider on 402, 404, 429, or 5xx. Each provider tries all its models before moving to the next. Force a specific provider to skip the waterfall.</div>
       </div>
 
       <!-- GEMINI -->
