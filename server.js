@@ -41,26 +41,26 @@ const KEYS = new Proxy({}, { get: (_, k) => getKeys()[k] });
 const WATERFALL = ['gemini', 'groq', 'openrouter'];
 
 const OPENROUTER_MODELS = [
-  'qwen/qwen3-235b-a22b:free',           // Qwen3 235B — best free 2026
-  'qwen/qwen3-coder:free',               // strong coder
-  'meta-llama/llama-3.3-70b-instruct:free',
-  'openai/gpt-oss-120b:free',
-  'deepseek/deepseek-r1:free',           // strong reasoning
-  'microsoft/phi-4-reasoning:free',
+  'openrouter/free',                           // auto-picks best free model — most reliable
+  'qwen/qwen3.6-plus-preview:free',            // confirmed free Oct 2026
+  'meta-llama/llama-3.3-70b-instruct:free',   // confirmed free
+  'qwen/qwen3-coder:free',                     // still available
+  'deepseek/deepseek-r1:free',                 // reasoning model free
+  'nvidia/nemotron-3-nano-30b-a3b:free',       // confirmed free Oct 2026
 ];
 
 const GROQ_MODELS = [
-  'llama-3.3-70b-versatile',  // best quality, 30 RPM free
-  'llama-3.1-8b-instant',     // fastest, highest volume free
-  'llama3-70b-8192',          // stable alias
-  'llama3-8b-8192',           // lightweight fallback
+  'llama-3.3-70b-versatile',   // #1 confirmed live Oct 2026
+  'meta-llama/llama-4-maverick-17b-128e-instruct',  // Llama 4 Maverick on Groq
+  'meta-llama/llama-4-scout-17b-16e-instruct',      // Llama 4 Scout on Groq
+  'llama-3.1-8b-instant',      // still active on paid tier
 ];
 
 const GEMINI_MODELS = [
-  'gemini-2.0-flash-lite',   // highest RPD free tier, confirmed 2026
-  'gemini-1.5-flash',        // stable production
-  'gemini-2.0-flash',        // experimental — may need billing
-  'gemini-1.5-flash-8b',     // smallest/cheapest fallback
+  'gemini-2.0-flash',              // confirmed working Oct 2026
+  'gemini-2.5-flash-preview',      // best quality free, may be rate-limited
+  'gemini-1.5-flash',              // stable fallback
+  'gemini-2.0-flash-exp',          // experimental alias
 ];
 
 // ─── SYSTEM PROMPT ────────────────────────────────────────────────────────────
@@ -163,6 +163,7 @@ async function streamGemini(messages, images, onToken, modelIdx = 0) {
   if (!key) throw Object.assign(new Error('No Gemini key'), { skip: true });
 
   const model = GEMINI_MODELS[modelIdx] || GEMINI_MODELS[0];
+  console.log(`[Gemini] trying model: ${model} (attempt ${modelIdx+1})`);
   // build contents
   const contents = messages.map(m => {
     const parts = [];
@@ -246,10 +247,12 @@ async function streamGroq(messages, onToken, modelIdx = 0) {
   );
 
   if (result.status !== 200) {
-    if ((result.status === 404 || result.status === 400) && modelIdx < GROQ_MODELS.length - 1) {
+    // 400 = decommissioned, 404 = not found, 422 = bad model — try next
+    if ([400, 404, 422].includes(result.status) && modelIdx < GROQ_MODELS.length - 1) {
+      console.log(`[Groq] model ${model} failed (${result.status}), trying next...`);
       return streamGroq(messages, onToken, modelIdx + 1);
     }
-    const err = new Error(`Groq ${result.status}: ${result.body ? result.body.slice(0,200) : ''}`);
+    const err = new Error(`Groq ${result.status}: ${result.body ? result.body.slice(0,300) : ''}`);
     err.status = result.status;
     throw err;
   }
@@ -368,7 +371,7 @@ async function streamOpenAI(messages, images, onToken) {
 }
 
 // ─── WATERFALL ROUTER ─────────────────────────────────────────────────────────
-const RETRY_CODES = new Set([402, 429, 500, 502, 503, 504]);
+const RETRY_CODES = new Set([402, 429, 500, 502, 503, 504, 410]);
 
 async function routeWithFallback(messages, images, provider, onToken, onProviderSwitch) {
   // explicit provider forced — skip waterfall entirely
@@ -391,7 +394,10 @@ async function routeWithFallback(messages, images, provider, onToken, onProvider
         // try each OR model
         for (let i = 0; i < OPENROUTER_MODELS.length; i++) {
           try { return await streamOpenRouter(messages, images, onToken, i); }
-          catch (e) { if (!RETRY_CODES.has(e.status)) throw e; }
+          catch (e) {
+            console.log(`[OpenRouter] model ${OPENROUTER_MODELS[i]} failed: ${e.status}`);
+            if (!RETRY_CODES.has(e.status) && e.status !== 410 && e.status !== 400) throw e;
+          }
         }
         throw new Error('All OpenRouter models exhausted');
       }
@@ -557,6 +563,92 @@ app.get('/api/chats/:id/export', (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="wormgpt-chat-${chat.id.slice(0,8)}.md"`);
   res.setHeader('Content-Type', 'text/markdown');
   res.send(md);
+});
+
+
+// ─── PROBE ENDPOINT — live-tests every provider/model and returns what works ─
+app.get('/api/probe', async (req, res) => {
+  const k = getKeys();
+  const results = {};
+
+  // Test Gemini — try each model
+  if (k.gemini) {
+    results.gemini = { working: null, tried: [] };
+    for (const model of GEMINI_MODELS) {
+      try {
+        const testBody = JSON.stringify({
+          contents: [{ role: 'user', parts: [{ text: 'hi' }] }],
+          generationConfig: { maxOutputTokens: 8 }
+        });
+        const r = await httpsPost('generativelanguage.googleapis.com',
+          `/v1beta/models/${model}:generateContent?key=${encodeURIComponent(k.gemini)}`,
+          { 'x-goog-api-key': k.gemini, 'Content-Type': 'application/json' },
+          testBody
+        );
+        const ok = r.status === 200;
+        results.gemini.tried.push({ model, status: r.status, ok });
+        if (ok && !results.gemini.working) {
+          results.gemini.working = model;
+          break;
+        }
+      } catch(e) {
+        results.gemini.tried.push({ model, error: e.message });
+      }
+    }
+  } else { results.gemini = { skip: 'no key' }; }
+
+  // Test Groq — try each model
+  if (k.groq) {
+    results.groq = { working: null, tried: [] };
+    for (const model of GROQ_MODELS) {
+      try {
+        const testBody = JSON.stringify({
+          model, stream: false, max_tokens: 8,
+          messages: [{ role: 'user', content: 'hi' }]
+        });
+        const r = await httpsPost('api.groq.com', '/openai/v1/chat/completions',
+          { Authorization: `Bearer ${k.groq}`, 'Content-Type': 'application/json' },
+          testBody
+        );
+        const ok = r.status === 200;
+        results.groq.tried.push({ model, status: r.status, ok });
+        if (ok && !results.groq.working) {
+          results.groq.working = model;
+          break;
+        }
+      } catch(e) {
+        results.groq.tried.push({ model, error: e.message });
+      }
+    }
+  } else { results.groq = { skip: 'no key' }; }
+
+  // Test OpenRouter — try first model
+  if (k.openrouter) {
+    results.openrouter = { working: null, tried: [] };
+    for (const model of OPENROUTER_MODELS) {
+      try {
+        const testBody = JSON.stringify({
+          model, stream: false, max_tokens: 8,
+          messages: [{ role: 'user', content: 'hi' }]
+        });
+        const r = await httpsPost('openrouter.ai', '/api/v1/chat/completions',
+          { Authorization: `Bearer ${k.openrouter}`, 'Content-Type': 'application/json',
+            'HTTP-Referer': 'https://wormgpt.local', 'X-Title': 'WormGPT' },
+          testBody
+        );
+        const ok = r.status === 200;
+        results.openrouter.tried.push({ model, status: r.status, ok });
+        if (ok && !results.openrouter.working) {
+          results.openrouter.working = model;
+          break;
+        }
+      } catch(e) {
+        results.openrouter.tried.push({ model, error: e.message });
+      }
+    }
+  } else { results.openrouter = { skip: 'no key' }; }
+
+  res.json(results);
 });
 
 // ─── START ────────────────────────────────────────────────────────────────────
