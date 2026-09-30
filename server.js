@@ -41,24 +41,26 @@ const KEYS = new Proxy({}, { get: (_, k) => getKeys()[k] });
 const WATERFALL = ['gemini', 'groq', 'openrouter'];
 
 const OPENROUTER_MODELS = [
-  'qwen/qwen3-coder:free',
-  'openai/gpt-oss-120b:free',
+  'qwen/qwen3-235b-a22b:free',           // Qwen3 235B — best free 2026
+  'qwen/qwen3-coder:free',               // strong coder
   'meta-llama/llama-3.3-70b-instruct:free',
-  'mistralai/mistral-7b-instruct:free',
+  'openai/gpt-oss-120b:free',
+  'deepseek/deepseek-r1:free',           // strong reasoning
+  'microsoft/phi-4-reasoning:free',
 ];
 
 const GROQ_MODELS = [
-  'llama-3.3-70b-versatile',
-  'llama-3.1-8b-instant',
-  'mixtral-8x7b-32768',
-  'gemma2-9b-it',
+  'llama-3.3-70b-versatile',  // best quality, 30 RPM free
+  'llama-3.1-8b-instant',     // fastest, highest volume free
+  'llama3-70b-8192',          // stable alias
+  'llama3-8b-8192',           // lightweight fallback
 ];
 
 const GEMINI_MODELS = [
-  'gemini-1.5-flash',
-  'gemini-1.5-flash-8b',
-  'gemini-2.0-flash',
-  'gemini-1.5-pro',
+  'gemini-2.0-flash-lite',   // highest RPD free tier, confirmed 2026
+  'gemini-1.5-flash',        // stable production
+  'gemini-2.0-flash',        // experimental — may need billing
+  'gemini-1.5-flash-8b',     // smallest/cheapest fallback
 ];
 
 // ─── SYSTEM PROMPT ────────────────────────────────────────────────────────────
@@ -103,12 +105,13 @@ const upload = multer({
 
 // ─── PROVIDER IMPLEMENTATIONS ─────────────────────────────────────────────────
 
-function httpsPost(hostname, path, headers, body) {
+function httpsPost(hostname, path, headers, body, method) {
   return new Promise((resolve, reject) => {
     const buf = typeof body === 'string' ? body : JSON.stringify(body);
+    const isGet = method === 'GET' || buf === '';
     const opts = {
-      hostname, path, method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(buf), ...headers }
+      hostname, path, method: isGet ? 'GET' : 'POST',
+      headers: { 'Content-Type': 'application/json', ...(isGet ? {} : { 'Content-Length': Buffer.byteLength(buf) }), ...headers }
     };
     const req = https.request(opts, res => {
       let data = '';
@@ -116,7 +119,7 @@ function httpsPost(hostname, path, headers, body) {
       res.on('end', () => resolve({ status: res.statusCode, body: data, headers: res.headers, stream: null }));
     });
     req.on('error', reject);
-    req.write(buf);
+    if (!isGet) req.write(buf);
     req.end();
   });
 }
@@ -189,8 +192,8 @@ async function streamGemini(messages, images, onToken, modelIdx = 0) {
   let full = '';
   const result = await httpsPostStream(
     'generativelanguage.googleapis.com',
-    `/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${key}`,
-    {},
+    `/v1beta/models/${model}:streamGenerateContent?alt=sse`,
+    { 'x-goog-api-key': key },
     body,
     (line) => {
       if (!line.startsWith('data:')) return;
@@ -567,27 +570,38 @@ app.post('/api/test-key', async (req, res) => {
 
   try {
     if (provider === 'gemini') {
+      // List models — confirms key works without needing a specific model
       const r = await httpsPost('generativelanguage.googleapis.com',
-        `/v1beta/models/gemini-1.5-flash?key=${key}`, {}, '');
+        '/v1beta/models?pageSize=5', { 'x-goog-api-key': key }, '');
       const ok = r.status === 200;
       let errMsg = null;
       if (!ok) {
-        try { const j = JSON.parse(r.body); errMsg = j.error?.message || `HTTP ${r.status}`; }
+        try { const j = JSON.parse(r.body); errMsg = j.error?.message || `HTTP ${r.status}: ${r.body.slice(0,120)}`; }
         catch { errMsg = `HTTP ${r.status}`; }
       }
       res.json({ ok, error: errMsg });
 
     } else if (provider === 'groq') {
       const r = await httpsPost('api.groq.com', '/openai/v1/models',
-        { Authorization: `Bearer ${key}` }, '{}');
+        { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, '');
       const ok = r.status === 200;
-      res.json({ ok, error: ok ? null : `HTTP ${r.status}` });
+      let errMsg = null;
+      if (!ok) {
+        try { const j = JSON.parse(r.body); errMsg = j.error?.message || `HTTP ${r.status}`; }
+        catch { errMsg = `HTTP ${r.status}: ${r.body.slice(0,120)}`; }
+      }
+      res.json({ ok, error: errMsg });
 
     } else if (provider === 'openrouter') {
-      const r = await httpsPost('openrouter.ai', '/api/v1/models',
-        { Authorization: `Bearer ${key}` }, '{}');
+      const r = await httpsPost('openrouter.ai', '/api/v1/auth/key',
+        { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, '');
       const ok = r.status === 200;
-      res.json({ ok, error: ok ? null : `HTTP ${r.status}` });
+      let errMsg = null;
+      if (!ok) {
+        try { const j = JSON.parse(r.body); errMsg = j.error?.message || `HTTP ${r.status}`; }
+        catch { errMsg = `HTTP ${r.status}: ${r.body.slice(0,120)}`; }
+      }
+      res.json({ ok, error: errMsg });
 
     } else {
       res.json({ ok: false, error: 'Unknown provider' });
