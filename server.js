@@ -192,7 +192,7 @@ async function streamGemini(messages, images, onToken, modelIdx = 0) {
   let full = '';
   const result = await httpsPostStream(
     'generativelanguage.googleapis.com',
-    `/v1beta/models/${model}:streamGenerateContent?alt=sse`,
+    `/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${encodeURIComponent(key)}`,
     { 'x-goog-api-key': key },
     body,
     (line) => {
@@ -371,11 +371,14 @@ async function streamOpenAI(messages, images, onToken) {
 const RETRY_CODES = new Set([402, 429, 500, 502, 503, 504]);
 
 async function routeWithFallback(messages, images, provider, onToken, onProviderSwitch) {
-  // explicit paid providers requested
-  if (provider === 'claude')   return await streamClaude(messages, images, onToken);
-  if (provider === 'openai')   return await streamOpenAI(messages, images, onToken);
+  // explicit provider forced — skip waterfall entirely
+  if (provider === 'claude')      return await streamClaude(messages, images, onToken);
+  if (provider === 'openai')      return await streamOpenAI(messages, images, onToken);
+  if (provider === 'gemini')      { if(onProviderSwitch) onProviderSwitch('gemini'); return await streamGemini(messages, images, onToken); }
+  if (provider === 'groq')        { if(onProviderSwitch) onProviderSwitch('groq');   return await streamGroq(messages, onToken); }
+  if (provider === 'openrouter')  { if(onProviderSwitch) onProviderSwitch('openrouter'); return await streamOpenRouter(messages, images, onToken); }
 
-  // waterfall: Gemini → Groq → OpenRouter
+  // auto waterfall: Gemini → Groq → OpenRouter
   const chain = [...WATERFALL];
   let lastErr;
 
@@ -461,14 +464,15 @@ const saveSettings = s => fs.writeFileSync(SETTINGS_FILE, JSON.stringify(s, null
 app.get('/api/settings', (_, res) => {
   const s = loadSettings();
   const k = getKeys();
+  const mask = v => v ? v.slice(0,6) + '...' + v.slice(-3) : '';
   res.json({
     defaultProvider: s.defaultProvider || 'auto',
     providers: {
-      gemini:     { available: !!k.gemini,     label: 'Google Gemini 2.0 Flash (free)' },
-      groq:       { available: !!k.groq,       label: 'Groq LLaMA 3.3 70B (free)' },
-      openrouter: { available: !!k.openrouter, label: 'OpenRouter Free Models' },
-      claude:     { available: !!k.claude,     label: 'Claude (paid)' },
-      openai:     { available: !!k.openai,     label: 'OpenAI GPT (paid)' },
+      gemini:     { available: !!k.gemini,     label: 'Google Gemini (free)', keyHint: mask(k.gemini) },
+      groq:       { available: !!k.groq,       label: 'Groq LLaMA 3.3 70B (free)', keyHint: mask(k.groq) },
+      openrouter: { available: !!k.openrouter, label: 'OpenRouter Free Models', keyHint: mask(k.openrouter) },
+      claude:     { available: !!k.claude,     label: 'Claude (paid)', keyHint: mask(k.claude) },
+      openai:     { available: !!k.openai,     label: 'OpenAI GPT (paid)', keyHint: mask(k.openai) },
     },
     waterfall: WATERFALL,
     openrouterModels: OPENROUTER_MODELS,
@@ -572,7 +576,7 @@ app.post('/api/test-key', async (req, res) => {
     if (provider === 'gemini') {
       // List models — confirms key works without needing a specific model
       const r = await httpsPost('generativelanguage.googleapis.com',
-        '/v1beta/models?pageSize=5', { 'x-goog-api-key': key }, '');
+        `/v1beta/models?pageSize=5&key=${encodeURIComponent(key)}`, { 'x-goog-api-key': key }, '');
       const ok = r.status === 200;
       let errMsg = null;
       if (!ok) {
