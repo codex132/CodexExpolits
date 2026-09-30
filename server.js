@@ -43,37 +43,35 @@ const WATERFALL = ['gemini', 'groq', 'openrouter'];
 const OPENROUTER_MODELS = process.env.OPENROUTER_MODELS
   ? process.env.OPENROUTER_MODELS.split(',').map(s => s.trim())
   : [
-  'qwen/qwen3-coder:free',                      // ✓ dj's specified first choice
-  'openai/gpt-oss-120b:free',                   // ✓ dj's specified second choice
-  'openrouter/free',                             // auto-router picks best free model
-  'qwen/qwen3.6-plus-preview:free',             // confirmed free Oct 2026
-  'meta-llama/llama-3.3-70b-instruct:free',    // confirmed free
-  'deepseek/deepseek-r1:free',                  // reasoning model free
-  'nvidia/nemotron-3-nano-30b-a3b:free',        // confirmed free
+  'openrouter/free',                             // ✓ PROBE 200 — auto-routes best free
+  'qwen/qwen3.6-plus-preview:free',             // ✓ confirmed free Oct 2026
+  'meta-llama/llama-3.3-70b-instruct:free',    // ✓ confirmed free
+  'deepseek/deepseek-r1:free',                  // ✓ reasoning free
+  'nvidia/nemotron-3-nano-30b-a3b:free',        // ✓ confirmed free
   'mistralai/mistral-7b-instruct:free',         // stable fallback
 ];
 
-// IDs sourced directly from dj's live Groq API key — /openai/v1/models response
+// IDs from dj's live Groq key + probe results
 const GROQ_MODELS = process.env.GROQ_MODELS
   ? process.env.GROQ_MODELS.split(',').map(s => s.trim())
   : [
-  'openai/gpt-oss-120b',       // ✓ confirmed active in dj's key response
-  'qwen/qwen3.8-27b',          // ✓ confirmed active in dj's key response
-  'openai/gpt-oss-20b',        // ✓ confirmed active in dj's key response
-  'allam-2-7b',                // ✓ confirmed active — Arabic + English
+  'openai/gpt-oss-120b',       // ✓ PROBE 200 — confirmed working
+  'qwen/qwen3.8-27b',          // ✓ confirmed in key response
+  'openai/gpt-oss-20b',        // ✓ confirmed in key response
+  'allam-2-7b',                // ✓ confirmed in key response
 ];
 
-// IDs sourced directly from dj's live API key — v1beta/models response
+// IDs sourced from dj's live API key + probe results
 const GEMINI_MODELS = process.env.GEMINI_MODELS
   ? process.env.GEMINI_MODELS.split(',').map(s => s.trim())
   : [
-  'gemini-3.1-flash-lite',     // ✓ confirmed in dj's key response
-  'gemini-flash-latest',       // ✓ confirmed — always points to latest flash
-  'gemini-3-flash-preview',    // ✓ confirmed in dj's key response
-  'gemini-3.5-flash-lite',     // ✓ confirmed — lightweight stable
-  'gemini-3.5-flash',          // ✓ confirmed — full flash
-  'gemini-3.6-flash',          // ✓ confirmed
-  'gemini-3.7-flash',          // ✓ confirmed
+  'gemini-3-flash-preview',    // ✓ PROBE 200 — confirmed working
+  'gemini-3.5-flash',          // ✓ in key response — full flash
+  'gemini-3.5-flash-lite',     // ✓ in key response — lightweight
+  'gemini-3.6-flash',          // ✓ in key response
+  'gemini-3.7-flash',          // ✓ in key response
+  'gemini-3.8-flash',          // ✓ in key response
+  'gemini-flash-latest',       // alias — probe 503 but worth retrying
 ];
 
 // ─── SYSTEM PROMPT ────────────────────────────────────────────────────────────
